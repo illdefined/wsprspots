@@ -14,11 +14,11 @@ keywords = ["amateur-radio", "wspr", "adif"]
 categories = ["command-line-utilities"]
 
 [dependencies]
-chrono = "*"
-modtype = "*"
-num-traits = "*"
-num-derive = "*"
-unicase = "*"
+chrono = "0.4"
+modtype = "0.7"
+num-traits = "0.2"
+num-derive = "0.3"
+unicase = "2.6"
 
 [profile.release]
 lto = true
