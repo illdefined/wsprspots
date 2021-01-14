@@ -4,6 +4,8 @@ version = "0.0.0"
 authors = ["Mikael Voss <mvs@nya.yt>"]
 edition = "2018"
 
+license = "MirOS"
+
 [dependencies]
 chrono = "*"
 modtype = "*"
