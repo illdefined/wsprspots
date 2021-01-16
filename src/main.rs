@@ -1,20 +1,18 @@
-#![feature(iterator_fold_self)]
+#![feature(exclusive_range_pattern, half_open_range_patterns, iterator_fold_self)]
 
 use std::cmp::{Ordering, PartialEq, PartialOrd, Eq, Ord};
 use std::collections::BTreeMap;
+use std::convert::TryFrom;
 use std::env;
 use std::error::Error;
 use std::fmt;
+use std::fmt::Display;
 use std::io;
 use std::io::prelude::*;
-use std::num::ParseIntError;
 use std::str::FromStr;
 use std::vec::Vec;
 
 use chrono::{DateTime, Utc, NaiveDateTime};
-
-use num_derive::FromPrimitive;
-use num_traits::FromPrimitive;
 
 use unicase::Ascii;
 
@@ -22,62 +20,124 @@ use unicase::Ascii;
 #[modtype::use_modtype]
 type Deg = modtype::F<360u16>;
 
-/// Frequency band
-///
-/// The discriminant values are based on the numerical identifiers typically encountered in the
-/// WSPRnet spot database.
-#[derive(Clone, Copy, Debug, FromPrimitive, PartialEq, Eq, PartialOrd, Ord)]
-enum Band {
-	B2200m = -1,
-	B630m = 0,
-	B160m = 1,
-	B80m = 3,
-	B60m = 5,
-	B40m = 7,
-	B30m = 10,
-	B20m = 14,
-	B17m = 18,
-	B15m = 21,
-	B12m = 24,
-	B10m = 28,
-	B6m = 50,
-	B4m = 70,
-	B2m = 144,
-	B70cm = 432,
-	B23cm = 1296
+/// Frequency
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Ord)]
+struct Frequency(u64);
+
+impl Frequency {
+	/// Get frequency in MHz
+	fn mhz(&self) -> f64 {
+		self.0 as f64 / 10e6
+	}
+
+	fn from_mhz(mhz: f64) -> Self {
+		Frequency((mhz * 1e6).round() as u64)
+	}
 }
 
-impl fmt::Display for Band {
-	fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-		let (value, unit) = match self {
-			Band::B2200m => ("2200", "m"),
-			Band::B630m => ("630", "m"),
-			Band::B160m => ("160", "m"),
-			Band::B80m => ("80", "m"),
-			Band::B60m => ("60", "m"),
-			Band::B40m => ("40", "m"),
-			Band::B30m => ("30", "m"),
-			Band::B20m => ("20", "m"),
-			Band::B17m => ("17", "m"),
-			Band::B15m => ("15", "m"),
-			Band::B12m => ("12", "m"),
-			Band::B10m => ("10", "m"),
-			Band::B6m => ("6", "m"),
-			Band::B4m => ("4", "m"),
-			Band::B2m => ("2", "m"),
-			Band::B70cm => ("70", "cm"),
-			Band::B23cm => ("23", "cm")
-		};
-
-		if formatter.alternate() {
-			// Pretty‐print frequency band
-			write!(formatter, "{} {}", value, unit)
+impl Display for Frequency {
+	fn fmt(&self, fmtr: &mut fmt::Formatter) -> fmt::Result {
+		if fmtr.alternate() {
+			match self.0 {
+				0..1_000
+					=> write!(fmtr, "{} Hz", self.0),
+				1_000..1_000_000
+					=> write!(fmtr, "{} kHz", self.0 as f64 / 1e3),
+				1_000_000..1_000_000_000
+					=> write!(fmtr, "{} MHz", self.0 as f64 / 1e6),
+				_
+					=> write!(fmtr, "{} GHz", self.0 as f64 / 1e9)
+			}
 		} else {
-			// Frequency band identifier for ADIF
-			write!(formatter, "{}{}", value, unit)
+			write!(fmtr, "{} Hz", self.0)
 		}
 	}
 }
+
+/// Frequency band
+#[derive(Clone, Debug)]
+struct Band(&'static str, &'static str);
+
+impl TryFrom<Frequency> for Band {
+	type Error = io::Error;
+
+	fn try_from(freq: Frequency) -> Result<Self, Self::Error> {
+		match freq.0 {
+			135_700..=137_800
+				=> Ok(Band("2200", "m")),
+			160_000..=190_000
+				=> Ok(Band("1750", "m")),
+			472_000..=479_000
+				=> Ok(Band("630", "m")),
+			1_800_000..=2_000_000
+				=> Ok(Band("160", "m")),
+			3_500_000..=4_000_000
+				=> Ok(Band("80", "m")),
+			5_060_000..=5_450_500
+				=> Ok(Band("60", "m")),
+			7_000_000..=7_300_000
+				=> Ok(Band("40", "m")),
+			10_100_000..=10_150_000
+				=> Ok(Band("30", "m")),
+			14_000_000..=14_350_000
+				=> Ok(Band("20", "m")),
+			18_068_000..=18_168_000
+				=> Ok(Band("17", "m")),
+			21_000_000..=21_450_000
+				=> Ok(Band("15", "m")),
+			24_890_000..=24_990_000
+				=> Ok(Band("12", "m")),
+			28_000_000..=29_700_000
+				=> Ok(Band("10", "m")),
+			40_000_000..=45_000_000
+				=> Ok(Band("8", "m")),
+			50_000_000..=54_000_000
+				=> Ok(Band("6", "m")),
+			54_000_001..=69_900_000
+				=> Ok(Band("5", "m")),
+			70_000_000..=71_000_000
+				=> Ok(Band("4", "m")),
+			144_000_000..=148_000_000
+				=> Ok(Band("2", "m")),
+			219_000_000..=225_000_000
+				=> Ok(Band("1.25", "m")),
+			420_000_000..=450_000_000
+				=> Ok(Band("70", "cm")),
+			902_000_000..=928_000_000
+				=> Ok(Band("33", "cm")),
+			1_240_000_000..=1_300_000_000
+				=> Ok(Band("23", "cm")),
+			2_300_000_000..=2_450_000_000
+				=> Ok(Band("13", "cm")),
+			3_300_000_000..=3_500_000_000
+				=> Ok(Band("9", "cm")),
+			5_600_000_000..=5_925_000_000
+				=> Ok(Band("6", "cm")),
+			10_000_000_000..=10_500_000_000
+				=> Ok(Band("1.25", "cm")),
+			24_000_000_000..=24_250_000_000
+				=> Ok(Band("6", "mm")),
+			75_500_000_000..=81_000_000_000
+				=> Ok(Band("4", "mm")),
+			119_980_000_000..=120_020_000_000
+				=> Ok(Band("2.5", "mm")),
+			142_000_000_000..=149_000_000_000
+				=> Ok(Band("2", "mm")),
+			241_000_000_000..=250_000_000_000
+				=> Ok(Band("1", "mm")),
+			_
+				=> Err(io::Error::new(io::ErrorKind::InvalidData, "Unknown frequency band"))
+		}
+	}
+}
+
+impl fmt::Display for Band {
+	fn fmt(&self, fmtr: &mut fmt::Formatter) -> fmt::Result {
+		write!(fmtr, "{} {}", self.0, self.1)
+	}
+}
+
 
 /// Transmission power
 #[repr(transparent)]
@@ -86,55 +146,54 @@ struct Power(i8);
 
 impl Power {
 	/// Convert power to Watts
-	fn to_watts(self) -> f64 {
+	fn watts(self) -> f64 {
 		10f64.powf(self.0 as f64 / 10.0 - 3.0)
 	}
-}
 
-impl FromStr for Power {
-	type Err = ParseIntError;
-
-	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		Ok(Power(i8::from_str(s)?))
+	fn from_dbm(dbm: i8) -> Power {
+		Power(dbm)
 	}
 }
 
 impl fmt::Display for Power {
 	fn fmt(&self, fmtr: &mut fmt::Formatter) -> fmt::Result {
-		if fmtr.alternate() {
-			// Pretty‐print transmission power in Watts
-			fn round(num: f64, mult: f64) -> f64 {
-				(num / mult).round() * mult
-			}
+		fn round(num: f64, mul: f64) -> f64 {
+			(num / mul).round() * mul
+		}
 
-			let watts = self.to_watts();
+		let watts = self.watts();
 
-			if watts >= 1000.0 {
-				write!(fmtr, "{:.1} kW", self.to_watts() / 1000.0)
-			} else if watts >= 100.0 {
-				write!(fmtr, "{:.0} W", round(self.to_watts(), 10.0))
-			} else if watts >= 10.0 {
-				write!(fmtr, "{:.0} W", round(self.to_watts(), 1.0))
-			} else if watts >= 1.0 {
-				write!(fmtr, "{:.1} W", self.to_watts())
-			} else if watts >= 0.1 {
-				write!(fmtr, "{:.0} mW", round(self.to_watts(), 0.01) * 1000.0)
-			} else if watts >= 0.01 {
-				write!(fmtr, "{:.0} mW", round(self.to_watts(), 0.001) * 1000.0)
-			} else if watts >= 0.001 {
-				write!(fmtr, "{:.1} mW", self.to_watts() * 1000.0)
-			} else {
-				write!(fmtr, "≤ 1 mW")
-			}
-		} else {
-			// Raw dBm value
-			write!(fmtr, "{}", self.0)
+		#[allow(illegal_floating_point_literal_pattern)]
+		match watts {
+			..1e-6
+				=> write!(fmtr, "{} nW", watts * 1e9),
+			1e-6..1e-5
+				=> write!(fmtr, "{:.1} µW", watts * 1e6),
+			1e-5..1e-4
+				=> write!(fmtr, "{:.0} µW", round(watts, 1e-6) * 1e6),
+			1e-4..1e-3
+				=> write!(fmtr, "{:.0} µW", round(watts, 1e-5) * 1e6),
+			1e-3..1e-2
+				=> write!(fmtr, "{:.1} mW", watts * 1e3),
+			1e-2..1e-1
+				=> write!(fmtr, "{:.0} mW", round(watts, 1e-3) * 1e3),
+			1e-1..1e0
+				=> write!(fmtr, "{:.0} mW", round(watts, 1e-2) * 1e3),
+			1e0..1e1
+				=> write!(fmtr, "{:.1} W", watts),
+			1e1..1e2
+				=> write!(fmtr, "{:.0} W", round(watts, 1e0)),
+			1e2..1e3
+				=> write!(fmtr, "{:.0} W", round(watts, 1e1)),
+			1e3..
+				=> write!(fmtr, "{:.1} kW", watts / 1e3),
+			_ => unreachable!()
 		}
 	}
 }
 
 /// WSPR spot
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct Spot {
 	/// Unique integer identifying a spot at WSPRnet
 	id: u64,
@@ -147,7 +206,7 @@ struct Spot {
 	/// Signal‐to‐noise ratio in dB
 	snr: i8,
 	/// Frequency of the received signal in MHz
-	frequency: f64,
+	frequency: Frequency,
 	/// Transmitter call sign
 	call_tx: Ascii<String>,
 	/// Transmitter Maidenhead locator
@@ -160,12 +219,6 @@ struct Spot {
 	distance: u16,
 	/// Approximate direction from transmitter to reporter along the great circle path in degrees
 	azimuth: Deg,
-	/// Frequency band
-	band: Band,
-	/// Reporter software version
-	version: String,
-	/// WSPRnet error code
-	code: i8
 }
 
 impl Spot {
@@ -180,7 +233,7 @@ impl Spot {
 	/// at <http://wspr.vk7jj.com/> because of slightly different rounding when calculating the
 	/// transmission power in Watts from dBm.
 	fn spotq(&self) -> f64 {
-		self.distance as f64 / self.power.to_watts() * ((self.snr as f64 + 36.0) / 36.0)
+		self.distance as f64 / self.power.watts() * ((self.snr as f64 + 36.0) / 36.0)
 	}
 }
 
@@ -196,63 +249,86 @@ impl FromStr for Spot {
 		let itr = &mut row.split(',');
 
 		Ok(Spot {
-			id: itr.next().ok_or_else(|| invalid("Missing ID field"))?.parse()?,
-			timestamp: itr.next().ok_or_else(|| invalid("Missing timestamp field"))?.parse()?,
-			call_rx: itr.next().ok_or_else(|| invalid("Missing reporter call sign field"))?.parse()?,
-			grid_rx: itr.next().ok_or_else(|| invalid("Missing reporter grid field"))?.parse()?,
-			snr: itr.next().ok_or_else(|| invalid("Missing SNR field"))?.parse()?,
-			frequency: itr.next().ok_or_else(|| invalid("Missing frequency field"))?.parse()?,
-			call_tx: itr.next().ok_or_else(|| invalid("Missing transmitter call sign field"))?.parse()?,
-			grid_tx: itr.next().ok_or_else(|| invalid("Missing transmitter grid field"))?.parse()?,
-			power: itr.next().ok_or_else(|| invalid("Missing transmission power field"))?.parse()?,
-			drift: itr.next().ok_or_else(|| invalid("Missing frequency drift field"))?.parse()?,
-			distance: itr.next().ok_or_else(|| invalid("Missing distance field"))?.parse()?,
-			azimuth: Deg(itr.next().ok_or_else(|| invalid("Missing azimuth field"))?.parse()?),
-			band: Band::from_isize(itr.next()
-				.ok_or_else(|| invalid("Missing band field"))?.parse()?)
-				.ok_or_else(|| invalid("Invalid frequency band"))?,
-			version: itr.next().ok_or_else(|| invalid("Missing version field"))?.to_string(),
-			code: itr.next().ok_or_else(|| invalid("Missing code field"))?.parse()?
+			id: itr.next()
+				.ok_or_else(|| invalid("Missing ID field"))?
+				.parse()?,
+			timestamp: itr.next()
+				.ok_or_else(|| invalid("Missing timestamp field"))?
+				.parse()?,
+			call_rx: itr.next()
+				.ok_or_else(|| invalid("Missing reporter call sign field"))?
+				.parse()?,
+			grid_rx: itr.next()
+				.ok_or_else(|| invalid("Missing reporter grid field"))?
+				.parse()?,
+			snr: itr.next()
+				.ok_or_else(|| invalid("Missing SNR field"))?
+				.parse()?,
+			frequency: Frequency::from_mhz(itr.next()
+				.ok_or_else(|| invalid("Missing frequency field"))?
+				.parse()?),
+			call_tx: itr.next()
+				.ok_or_else(|| invalid("Missing transmitter call sign field"))?
+				.parse()?,
+			grid_tx: itr.next()
+				.ok_or_else(|| invalid("Missing transmitter grid field"))?
+				.parse()?,
+			power: Power::from_dbm(itr.next()
+				.ok_or_else(|| invalid("Missing transmission power field"))?
+				.parse()?),
+			drift: itr.next()
+				.ok_or_else(|| invalid("Missing frequency drift field"))?
+				.parse()?,
+			distance: itr.next()
+				.ok_or_else(|| invalid("Missing distance field"))?
+				.parse()?,
+			azimuth: Deg(itr.next()
+				.ok_or_else(|| invalid("Missing azimuth field"))?
+				.parse()?)
 		})
 	}
 }
 
 impl fmt::Display for Spot {
 	fn fmt(&self, fmtr: &mut fmt::Formatter) -> fmt::Result {
-		if fmtr.alternate() {
-			// Pretty‐print spot information
-			write!(fmtr, "{}: {} → {} ({} → {}) @ {:#}, {:#}, SNR {} dB, drift {:+} Hz/s, distance {} km",
-			       self.datetime().format("%Y-%m-%d %H:%M"), self.call_tx, self.call_rx, self.grid_tx, self.grid_rx,
-			       self.band, self.power, self.snr, self.drift, self.distance)
-		} else {
-			// Generate ADIF record for spot
-			fn field(fmtr: &mut fmt::Formatter, name: &str, args: fmt::Arguments) -> fmt::Result {
-				let value = fmt::format(args);
-				writeln!(fmtr, "<{}:{}>{}", name, value.len(), value)
-			}
-
-			let datetime = self.datetime();
-			field(fmtr, "QSO_DATE", format_args!("{}", datetime.format("%Y%m%d")))?;
-			field(fmtr, "TIME_ON", format_args!("{}", datetime.format("%H%M")))?;
-			field(fmtr, "OPERATOR", format_args!("{}", self.call_rx))?;
-			field(fmtr, "MY_GRIDSQUARE", format_args!("{}", self.grid_rx))?;
-			field(fmtr, "RST_SENT", format_args!("{} dB", self.snr))?;
-			field(fmtr, "FREQ", format_args!("{}", self.frequency))?;
-			field(fmtr, "CALL", format_args!("{}", self.call_tx))?;
-			field(fmtr, "GRIDSQUARE", format_args!("{}", self.grid_tx))?;
-			field(fmtr, "RX_PWR", format_args!("{:.4}", self.power.to_watts()))?;
-			field(fmtr, "DISTANCE", format_args!("{}", self.distance))?;
-			field(fmtr, "BAND", format_args!("{}", self.band))?;
-			field(fmtr, "MODE", format_args!("WSPR"))?;
-			field(fmtr, "QSO_RANDOM", format_args!("Y"))?;
-			field(fmtr, "SWL", format_args!("Y"))?;
-			field(fmtr, "QSLMSG",
-			      format_args!("WSPR spot on {:#} with {:#} ({} dBm), SNR {} dB, drift {:+} Hz/s, distance {} km",
-			                   self.band, self.power, self.power, self.snr, self.drift, self.distance))?;
-			field(fmtr, "COMMENT", format_args!("WSPRnet spot ID {}", self.id))?;
-			field(fmtr, "NOTES", format_args!("SpotQ {:.0}", self.spotq()))?;
-			writeln!(fmtr, "<EOR>")
+		macro_rules! adif {
+			($name:tt, $($arg:tt)*) => {{
+				let value = format!($($arg)*);
+				write!(fmtr, "<{}:{}>{}", $name, value.len(), value)
+			}}
 		}
+
+		adif!("QSO_DATE", "{}", self.datetime().format("%Y%m%d"))?;
+		adif!("TIME_ON", "{}", self.datetime().format("%H%M"))?;
+		adif!("OPERATOR", "{}", self.call_rx)?;
+		adif!("MY_GRIDSQUARE", "{}", self.grid_rx)?;
+		adif!("RST_SENT", "{} dB", self.snr)?;
+		adif!("FREQ", "{:.6}", self.frequency.mhz())?;
+		adif!("CALL", "{}", self.call_tx)?;
+		adif!("GRIDSQUARE", "{}", self.grid_tx)?;
+		adif!("RX_PWR", "{:.4}", self.power.watts())?;
+		adif!("DISTANCE", "{}", self.distance)?;
+
+		match Band::try_from(self.frequency) {
+			Ok(band) => adif!("BAND", "{}", band)?,
+			Err(_) => ()
+		}
+
+		adif!("MODE", "WSPR")?;
+		adif!("QSO_RANDOM", "Y")?;
+		adif!("SWL", "Y")?;
+
+		let band_or_freq = match Band::try_from(self.frequency) {
+			Ok(band) => band.to_string(),
+			Err(_) => self.frequency.to_string()
+		};
+
+		adif!("QSLMSG",
+		      "WSPR spot on {} with {} ({} dBm), SNR {} dB, drift {:+} Hz/s, distance {} km",
+		      band_or_freq, self.power, self.power.0, self.snr, self.drift, self.distance)?;
+		adif!("COMMENT", "WSPRnet spot ID {}", self.id)?;
+		adif!("NOTES", "SpotQ {:.0}", self.spotq())?;
+		write!(fmtr, "<EOR>")
 	}
 }
 
