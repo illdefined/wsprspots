@@ -310,7 +310,7 @@ impl fmt::Display for Spot {
 		adif!("DISTANCE", "{}", self.distance)?;
 
 		match Band::try_from(self.frequency) {
-			Ok(band) => adif!("BAND", "{}", band)?,
+			Ok(band) => adif!("BAND", "{}{}", band.0, band.1)?,
 			Err(_) => ()
 		}
 
