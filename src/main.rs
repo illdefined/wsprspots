@@ -382,6 +382,11 @@ fn main() -> std::io::Result<()> {
 		}
 	}
 
+	let pkg_name = env!("CARGO_PKG_NAME");
+	let pkg_version = env!("CARGO_PKG_VERSION");
+	println!("<ADIF_VER:5>3.1.1<CREATED_TIMESTAMP:15>{}<PROGRAMID:{}>{}<PROGRAMVERSION:{}>{}<EOH>",
+	         Utc::now().format("%Y%m%d %H%M%S"), pkg_name.len(), pkg_name, pkg_version.len(), pkg_version);
+
 	// Determine the best spot for every transmitter according to SpotQ
 	for vec in spots.values() {
 		match &vec.iter().fold_first(|best, spot| {
