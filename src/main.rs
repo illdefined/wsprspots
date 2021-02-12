@@ -304,6 +304,7 @@ impl fmt::Display for Spot {
 		adif!("OPERATOR", "{}", self.call_rx)?;
 		adif!("MY_GRIDSQUARE", "{}", self.grid_rx)?;
 		adif!("RST_SENT", "{} dB", self.snr)?;
+		adif!("RST_RCVD", "")?;
 		adif!("SNR", "{}", self.snr)?;
 		adif!("DRIFT", "{}", self.drift)?;
 		adif!("FREQ", "{:.6}", self.frequency.mhz())?;
