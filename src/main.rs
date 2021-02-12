@@ -303,14 +303,14 @@ impl fmt::Display for Spot {
 		adif!("OPERATOR", "{}", self.call_rx)?;
 		adif!("MY_GRIDSQUARE", "{}", self.grid_rx)?;
 		adif!("RST_SENT", "{} dB", self.snr)?;
-		adif!("FREQ", "{:.6}", self.frequency.mhz())?;
+		adif!("FREQ_RX", "{:.6}", self.frequency.mhz())?;
 		adif!("CALL", "{}", self.call_tx)?;
 		adif!("GRIDSQUARE", "{}", self.grid_tx)?;
 		adif!("RX_PWR", "{:.4}", self.power.watts())?;
 		adif!("DISTANCE", "{}", self.distance)?;
 
 		match Band::try_from(self.frequency) {
-			Ok(band) => adif!("BAND", "{}{}", band.0, band.1)?,
+			Ok(band) => adif!("BAND_RX", "{}{}", band.0, band.1)?,
 			Err(_) => ()
 		}
 
