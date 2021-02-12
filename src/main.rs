@@ -298,15 +298,22 @@ impl fmt::Display for Spot {
 			}}
 		}
 
-		adif!("SPOTID", "{}", self.id)?;
+		macro_rules! appf {
+			($name:tt, $type:tt, $($arg:tt)*) => {{
+				let value = format!($($arg)*);
+				write!(fmtr, "<{}:{}:{}>{}", concat!("APP_WSPRSPOTS_", $name), value.len(), $type, value)
+			}}
+		}
+
+		appf!("SPOTID", "N", "{}", self.id)?;
 		adif!("QSO_DATE", "{}", self.datetime().format("%Y%m%d"))?;
 		adif!("TIME_ON", "{}", self.datetime().format("%H%M"))?;
 		adif!("OPERATOR", "{}", self.call_rx)?;
 		adif!("MY_GRIDSQUARE", "{}", self.grid_rx)?;
 		adif!("RST_SENT", "{} dB", self.snr)?;
 		adif!("RST_RCVD", "")?;
-		adif!("SNR", "{}", self.snr)?;
-		adif!("DRIFT", "{}", self.drift)?;
+		appf!("SNR", "N", "{}", self.snr)?;
+		appf!("DRIFT", "N", "{}", self.drift)?;
 		adif!("FREQ", "{:.6}", self.frequency.mhz())?;
 		adif!("CALL", "{}", self.call_tx)?;
 		adif!("GRIDSQUARE", "{}", self.grid_tx)?;
@@ -321,7 +328,7 @@ impl fmt::Display for Spot {
 		adif!("MODE", "WSPR")?;
 		adif!("QSO_RANDOM", "Y")?;
 		adif!("SWL", "Y")?;
-		adif!("SPOTQ", "{:.0}", self.spotq())?;
+		appf!("SPOTQ", "N", "{:.0}", self.spotq())?;
 
 		let band_or_freq = match Band::try_from(self.frequency) {
 			Ok(band) => band.to_string(),
@@ -394,10 +401,6 @@ fn main() -> std::io::Result<()> {
 	         <CREATED_TIMESTAMP:15>{}\
 	         <PROGRAMID:{}>{}\
 	         <PROGRAMVERSION:{}>{}\
-	         <USERDEF1:6:N>SPOTID\
-	         <USERDEF2:3:N>SNR\
-	         <USERDEF3:5:S>DRIFT\
-	         <USERDEF4:5:N>SPOTQ\
 	         <EOH>",
 	         call_op, Utc::now().format("%Y%m%d %H%M%S"), pkg_name.len(), pkg_name, pkg_version.len(), pkg_version);
 
