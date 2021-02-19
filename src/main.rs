@@ -1,7 +1,7 @@
-#![feature(exclusive_range_pattern, half_open_range_patterns, iterator_fold_self)]
+#![feature(exclusive_range_pattern, half_open_range_patterns, hash_drain_filter)]
 
-use std::cmp::{Ordering, PartialEq, PartialOrd, Eq, Ord};
-use std::collections::BTreeMap;
+use std::cmp::{self, Ordering, PartialEq, PartialOrd, Eq, Ord};
+use std::collections::{HashMap, BTreeSet, VecDeque};
 use std::convert::TryFrom;
 use std::env;
 use std::error::Error;
@@ -10,15 +10,16 @@ use std::fmt::Display;
 use std::io;
 use std::io::prelude::*;
 use std::str::FromStr;
-use std::vec::Vec;
 
+use smartstring::alias::String;
 use chrono::{DateTime, Utc, NaiveDateTime};
-
 use unicase::Ascii;
 
-/// Arc degree
-#[modtype::use_modtype]
-type Deg = modtype::F<360u16>;
+/// Call sign
+type Call = Ascii<String>;
+
+/// Maidenhead locator
+type Grid = Ascii<String>;
 
 /// Frequency
 #[repr(transparent)]
@@ -28,7 +29,7 @@ struct Frequency(u64);
 impl Frequency {
 	/// Get frequency in MHz
 	fn mhz(&self) -> f64 {
-		self.0 as f64 / 10e6
+		self.0 as f64 / 1e6
 	}
 
 	fn from_mhz(mhz: f64) -> Self {
@@ -56,7 +57,7 @@ impl Display for Frequency {
 }
 
 /// Frequency band
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct Band(&'static str, &'static str);
 
 impl TryFrom<Frequency> for Band {
@@ -138,10 +139,9 @@ impl fmt::Display for Band {
 	}
 }
 
-
 /// Transmission power
 #[repr(transparent)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct Power(i8);
 
 impl Power {
@@ -200,40 +200,28 @@ struct Spot {
 	/// The time of the spot in seconds since the Unix epoch
 	timestamp: u64,
 	/// Reporter call sign
-	call_rx: Ascii<String>,
+	call_rx: Call,
 	/// Reporter Maidenhead locator
-	grid_rx: Ascii<String>,
+	grid_rx: Call,
 	/// Signal‐to‐noise ratio in dB
 	snr: i8,
 	/// Frequency of the received signal in MHz
 	frequency: Frequency,
 	/// Transmitter call sign
-	call_tx: Ascii<String>,
+	call_tx: Call,
 	/// Transmitter Maidenhead locator
-	grid_tx: Ascii<String>,
+	grid_tx: Call,
 	/// Transmission power as reported by the transmitting station in dBm
 	power: Power,
 	/// Frequency drift in Hz / s
 	drift: i8,
 	/// Approximate distance between transmitter and reporter along the great circle path in km
 	distance: u16,
-	/// Approximate direction from transmitter to reporter along the great circle path in degrees
-	azimuth: Deg,
 }
 
 impl Spot {
-	/// Create [DateTime] object from spot timestamp
-	fn datetime(&self) -> DateTime<Utc> {
-		DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(self.timestamp as i64, 0), Utc)
-	}
-
-	/// Calculate SpotQ metric for spot
-	///
-	/// The results may differ slightly from the reference implementation by Phil VKJ77 Perite
-	/// at <http://wspr.vk7jj.com/> because of slightly different rounding when calculating the
-	/// transmission power in Watts from dBm.
-	fn spotq(&self) -> f64 {
-		self.distance as f64 / self.power.watts() * ((self.snr as f64 + 36.0) / 36.0)
+	fn cycle(&self) -> u64 {
+		self.timestamp / 120
 	}
 }
 
@@ -282,65 +270,7 @@ impl FromStr for Spot {
 			distance: itr.next()
 				.ok_or_else(|| invalid("Missing distance field"))?
 				.parse()?,
-			azimuth: Deg(itr.next()
-				.ok_or_else(|| invalid("Missing azimuth field"))?
-				.parse()?)
 		})
-	}
-}
-
-impl fmt::Display for Spot {
-	fn fmt(&self, fmtr: &mut fmt::Formatter) -> fmt::Result {
-		macro_rules! adif {
-			($name:tt, $($arg:tt)*) => {{
-				let value = format!($($arg)*);
-				write!(fmtr, "<{}:{}>{}", $name, value.len(), value)
-			}}
-		}
-
-		macro_rules! appf {
-			($name:tt, $type:tt, $($arg:tt)*) => {{
-				let value = format!($($arg)*);
-				write!(fmtr, "<{}:{}:{}>{}", concat!("APP_WSPRSPOTS_", $name), value.len(), $type, value)
-			}}
-		}
-
-		appf!("SPOTID", "N", "{}", self.id)?;
-		adif!("QSO_DATE", "{}", self.datetime().format("%Y%m%d"))?;
-		adif!("TIME_ON", "{}", self.datetime().format("%H%M"))?;
-		adif!("OPERATOR", "{}", self.call_rx)?;
-		adif!("MY_GRIDSQUARE", "{}", self.grid_rx)?;
-		adif!("RST_SENT", "{} dB", self.snr)?;
-		adif!("RST_RCVD", "")?;
-		appf!("SNR", "N", "{}", self.snr)?;
-		appf!("DRIFT", "N", "{}", self.drift)?;
-		adif!("FREQ", "{:.6}", self.frequency.mhz())?;
-		adif!("CALL", "{}", self.call_tx)?;
-		adif!("GRIDSQUARE", "{}", self.grid_tx)?;
-		adif!("RX_PWR", "{:.4}", self.power.watts())?;
-		adif!("DISTANCE", "{}", self.distance)?;
-
-		match Band::try_from(self.frequency) {
-			Ok(band) => adif!("BAND", "{}{}", band.0, band.1)?,
-			Err(_) => ()
-		}
-
-		adif!("MODE", "WSPR")?;
-		adif!("QSO_RANDOM", "Y")?;
-		adif!("SWL", "Y")?;
-		appf!("SPOTQ", "N", "{:.0}", self.spotq())?;
-
-		let band_or_freq = match Band::try_from(self.frequency) {
-			Ok(band) => band.to_string(),
-			Err(_) => self.frequency.to_string()
-		};
-
-		adif!("QSLMSG",
-		      "WSPR spot on {} with {} ({} dBm), SNR {} dB, drift {:+} Hz/s, distance {} km",
-		      band_or_freq, self.power, self.power.0, self.snr, self.drift, self.distance)?;
-		adif!("COMMENT", "WSPRnet spot ID {}", self.id)?;
-		adif!("NOTES", "SpotQ {:.0}", self.spotq())?;
-		write!(fmtr, "<EOR>")
 	}
 }
 
@@ -364,39 +294,196 @@ impl Ord for Spot {
 	}
 }
 
+/// WSPR QSO
+#[derive(Clone, Debug)]
+struct Qso {
+	/// Operator call sign
+	call_op: Call,
+	/// Contact call sign
+	call_ct: Call,
+	/// Operator Maidenhead locator
+	grid_op: Grid,
+	/// Contact Maidenhead locator
+	grid_ct: Grid,
+	/// Timestamp of start of QSO
+	time_first: u64,
+	/// Timestamp of end of QSO
+	time_last: u64,
+	/// Operator’s SNR
+	snr_op: i8,
+	/// Contact’s SNR
+	snr_ct: i8,
+	/// Operator’s transmit power
+	power_op: Power,
+	/// Contact’s transmit power
+	power_ct: Power,
+	/// Operator’s transmit frequency
+	freq_op: Frequency,
+	/// Contact’s transmit frequency
+	freq_ct: Frequency,
+	/// Operator’s frequency drift
+	drift_op: i8,
+	/// Contact’s frequency drift
+	drift_ct: i8,
+	/// Approximate distance between operator and contact along the great circle path in km
+	distance: u16,
+	/// Spot IDs
+	spots: BTreeSet<u64>
+}
+
+impl Qso {
+	fn new(op: &Spot, ct: &Spot) -> Self {
+		let mut spots = BTreeSet::<u64>::new();
+		spots.insert(op.id);
+		spots.insert(ct.id);
+
+		Qso {
+			call_op: op.call_rx.clone(),
+			call_ct: op.call_tx.clone(),
+			grid_op: op.grid_rx.clone(),
+			grid_ct: op.grid_tx.clone(),
+			time_first: cmp::min(op.timestamp, ct.timestamp),
+			time_last: cmp::max(op.timestamp, ct.timestamp),
+			snr_op: ct.snr,
+			snr_ct: op.snr,
+			power_op: ct.power,
+			power_ct: op.power,
+			freq_op: ct.frequency,
+			freq_ct: op.frequency,
+			drift_op: ct.drift,
+			drift_ct: op.drift,
+			distance: op.distance,
+			spots: spots
+		}
+	}
+
+	fn update(&mut self, op: &Spot, ct: &Spot) {
+		self.time_first = cmp::min(self.time_first, cmp::min(op.timestamp, ct.timestamp));
+		self.time_last = cmp::max(self.time_last, cmp::max(op.timestamp, ct.timestamp));
+		self.snr_op = cmp::max(self.snr_op, ct.snr);
+		self.snr_ct = cmp::max(self.snr_ct, op.snr);
+		self.drift_op = cmp::max(self.drift_op, ct.drift);
+		self.drift_ct = cmp::max(self.drift_ct, op.drift);
+		self.power_op = cmp::min(self.power_op, ct.power);
+		self.power_ct = cmp::min(self.power_ct, op.power);
+		self.spots.insert(op.id);
+		self.spots.insert(ct.id);
+	}
+
+	fn cycle_last(&self) -> u64 {
+		self.time_last / 120
+	}
+
+	/// Create [DateTime] object from start timestamp
+	fn datetime_on(&self) -> DateTime<Utc> {
+		DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(self.time_first as i64, 0), Utc)
+	}
+
+	/// Create [DateTime] object from end timestamp
+	fn datetime_off(&self) -> DateTime<Utc> {
+		DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp((self.time_last + 120) as i64, 0), Utc)
+	}
+}
+
+impl fmt::Display for Qso {
+	fn fmt(&self, fmtr: &mut fmt::Formatter) -> fmt::Result {
+		macro_rules! adif {
+			($name:tt, $($arg:tt)*) => {{
+				let value = format!($($arg)*);
+				write!(fmtr, "<{}:{}>{}", $name, value.len(), value)
+			}}
+		}
+
+		fn fmt_spots(set: &BTreeSet<u64>) -> String {
+			let mut iter = set.iter();
+			let mut st = String::new();
+
+			// Assume that every set contains at least two IDs
+			st.push_str(&iter.next().unwrap().to_string());
+			for id in iter {
+				st.push_str(", ");
+				st.push_str(&id.to_string());
+			}
+
+			st
+		}
+
+		adif!("QSO_DATE", "{}", self.datetime_on().format("%Y%m%d"))?;
+		adif!("TIME_ON", "{}", self.datetime_on().format("%H%M"))?;
+		adif!("QSO_DATE_OFF", "{}", self.datetime_off().format("%Y%m%d"))?;
+		adif!("TIME_OFF", "{}", self.datetime_off().format("%H%M"))?;
+		adif!("OPERATOR", "{}", self.call_op)?;
+		adif!("CALL", "{}", self.call_ct)?;
+		adif!("MY_GRIDSQUARE", "{}", self.grid_op)?;
+		adif!("GRIDSQUARE", "{}", self.grid_ct)?;
+		adif!("RST_RCVD", "{:+03}", self.snr_op)?;
+		adif!("RST_SENT", "{:+03}", self.snr_ct)?;
+		adif!("FREQ", "{:.6}", self.freq_op.mhz())?;
+		adif!("RX_FREQ", "{:.6}", self.freq_ct.mhz())?;
+
+		match Band::try_from(self.freq_op) {
+			Ok(band) => adif!("BAND", "{}{}", band.0, band.1)?,
+			Err(_) => ()
+		}
+
+		match Band::try_from(self.freq_ct) {
+			Ok(band) => adif!("BAND_RX", "{}{}", band.0, band.1)?,
+			Err(_) => ()
+		}
+
+		adif!("TX_PWR", "{:.4}", self.power_op.watts())?;
+		adif!("RX_PWR", "{:.4}", self.power_ct.watts())?;
+		adif!("DISTANCE", "{}", self.distance)?;
+
+		let band_op = match Band::try_from(self.freq_op) {
+			Ok(band) => band.to_string(),
+			Err(_) => self.freq_op.to_string()
+		};
+
+		let band_ct = match Band::try_from(self.freq_ct) {
+			Ok(band) => band.to_string(),
+			Err(_) => self.freq_ct.to_string()
+		};
+
+		let band_str = if band_op == band_ct {
+			band_op
+		} else {
+			format!("{} (RX {})", band_op, band_ct)
+		};
+
+		adif!("QSLMSG",
+		      "2-way WSPR spot on {} with {} ({} dBm), SNR {} dB, drift {:+} Hz/s, distance {} km",
+		      band_str, self.power_ct, self.power_ct.0, self.snr_ct, self.drift_ct, self.distance)?;
+		adif!("COMMENT",
+		      "2-way WSPR spot on {} with {} ({} dBm), SNR {} dB, drift {:+} Hz/s, distance {} km",
+		      band_str, self.power_ct, self.power_ct.0, self.snr_ct, self.drift_ct, self.distance)?;
+
+		adif!("NOTES", "WSPRnet spot IDs {}", fmt_spots(&self.spots))?;
+		adif!("MODE", "WSPR")?;
+		adif!("QSO_RANDOM", "Y")?;
+		write!(fmtr, "<EOR>")
+	}
+}
+
+#[derive(Hash, PartialEq, Eq)]
+struct QsoKey(Call, Grid, Grid, Band, Band);
+
 fn main() -> std::io::Result<()> {
 	let call_op = Ascii::new(env::args().nth(1).expect("Missing operator call sign"));
 	let stdin = io::stdin();
 
-	// Collect all spots by transmitter
-	let mut spots = BTreeMap::new();
+	let mut cycle = 0u64;
 
-	for line in stdin.lock().lines() {
-		let row = line?;
+	// Look back queues
+	let mut rx = VecDeque::<Spot>::new();
+	let mut tx = VecDeque::<Spot>::new();
 
-		match row.split(',').nth(2) {
-			Some(call_rx) if call_rx == call_op => {
-				match row.parse::<Spot>() {
-					Ok(spot) => {
-						spots.entry(spot.call_tx.clone()).or_insert_with(Vec::new).push(spot);
-					},
-					Err(err) => {
-						eprintln!("Failed to parse row: {}\n\n{}", err, row);
-						continue;
-					}
-				}
-			},
-			Some(_) => { }
-			None => {
-				eprintln!("Unable to identify operator call sign in row:\n\n{}", row);
-				continue;
-			}
-		}
-	}
+	// Active QSOs
+	let mut qsos = HashMap::<QsoKey, Qso>::new();
 
 	let pkg_name = env!("CARGO_PKG_NAME");
 	let pkg_version = env!("CARGO_PKG_VERSION");
-	println!("WSPR spots for {}\n\
+	println!("Mutual WSPR spots for {}\n\
 	         <ADIF_VER:5>3.1.1\
 	         <CREATED_TIMESTAMP:15>{}\
 	         <PROGRAMID:{}>{}\
@@ -404,14 +491,80 @@ fn main() -> std::io::Result<()> {
 	         <EOH>",
 	         call_op, Utc::now().format("%Y%m%d %H%M%S"), pkg_name.len(), pkg_name, pkg_version.len(), pkg_version);
 
-	// Determine the best spot for every transmitter according to SpotQ
-	for vec in spots.values() {
-		match &vec.iter().fold_first(|best, spot| {
-			if spot.spotq() > best.spotq() { spot } else { best }
-		}) {
-			Some(spot) => println!("{}", spot),
-			None => continue
+	for line in stdin.lock().lines() {
+		let row = line?;
+
+		let last = match row.parse::<Spot>() {
+			Ok(spot) => spot,
+			Err(err) => {
+				eprintln!("Failed to parse row: {}\n\n{}", err, row);
+				continue;
+			}
 		};
+
+		if last.call_rx != call_op && last.call_tx != call_op {
+			continue;
+		}
+
+		// Start new cycle
+		if last.cycle() > cycle {
+			cycle = last.cycle();
+
+			// Purge reporter spots
+			rx.retain(|spot| {
+				spot.cycle() >= cycle - 2
+			});
+
+			// Purge transmitter spots
+			tx.retain(|spot| {
+				spot.cycle() >= cycle - 2
+			});
+		}
+
+		let band_last = match Band::try_from(last.frequency) {
+			Ok(band) => band,
+			Err(err) => {
+				eprintln!("Unable to determine band for {}: {}", last.frequency, err);
+				continue;
+			}
+		};
+
+		// Spots as reporter
+		if last.call_rx == call_op {
+			for spot in &tx {
+				if spot.call_rx == last.call_tx &&
+				   spot.grid_rx == last.grid_tx &&
+				   spot.grid_tx == last.grid_rx {
+					let band_spot = Band::try_from(spot.frequency).unwrap();
+					qsos.entry(QsoKey(last.call_tx.clone(), last.grid_rx.clone(), last.grid_tx.clone(), band_last.clone(), band_spot)).or_insert_with(|| {
+						Qso::new(&last, &spot)
+					}).update(&last, &spot);
+				}
+			}
+
+			rx.push_back(last);
+		// Spots as transmitter
+		} else if last.call_tx == call_op {
+			for spot in &rx {
+				if spot.call_tx == last.call_rx &&
+				   spot.grid_rx == last.grid_tx &&
+				   spot.grid_tx == last.grid_rx {
+					let band_spot = Band::try_from(spot.frequency).unwrap();
+					qsos.entry(QsoKey(last.call_rx.clone(), last.grid_tx.clone(), last.grid_rx.clone(), band_spot, band_last.clone())).or_insert_with(|| {
+						Qso::new(&spot, &last)
+					}).update(&spot, &last);
+				}
+			}
+
+			tx.push_back(last);
+		}
+
+		// Log QSOs with no more spots
+		for (_, qso) in qsos.drain_filter(|_, qso| {
+			qso.cycle_last() >= cycle - 2
+		}) {
+			println!("{}", qso);
+		}
 	}
 
 	Ok(())

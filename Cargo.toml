@@ -1,6 +1,6 @@
 [package]
 name = "wsprspots"
-version = "0.0.5"
+version = "0.1.0"
 authors = ["Mikael Voss <mvs@nya.yt>"]
 edition = "2018"
 
@@ -15,7 +15,7 @@ categories = ["command-line-utilities"]
 
 [dependencies]
 chrono = "0.4"
-modtype = "0.7"
+smartstring = "0.2"
 unicase = "2.6"
 
 [profile.release]
