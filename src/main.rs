@@ -1,5 +1,8 @@
 #![feature(exclusive_range_pattern, half_open_range_patterns, hash_drain_filter)]
 
+mod excluded;
+use crate::excluded::EXCLUDED;
+
 use std::cmp::{self, Ordering, PartialEq, PartialOrd, Eq, Ord};
 use std::collections::{HashMap, BTreeSet, VecDeque};
 use std::convert::TryFrom;
@@ -531,6 +534,10 @@ fn main() -> std::io::Result<()> {
 
 		// Spots as reporter
 		if last.call_rx == call_op {
+			if EXCLUDED.contains(last.call_tx.as_ref()) {
+				continue;
+			}
+
 			for spot in &tx {
 				if spot.call_rx == last.call_tx &&
 				   spot.grid_rx == last.grid_tx &&
@@ -545,6 +552,10 @@ fn main() -> std::io::Result<()> {
 			rx.push_back(last);
 		// Spots as transmitter
 		} else if last.call_tx == call_op {
+			if EXCLUDED.contains(last.call_rx.as_ref()) {
+				continue;
+			}
+
 			for spot in &rx {
 				if spot.call_tx == last.call_rx &&
 				   spot.grid_rx == last.grid_tx &&
