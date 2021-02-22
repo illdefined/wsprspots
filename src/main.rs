@@ -572,7 +572,7 @@ fn main() -> std::io::Result<()> {
 
 		// Log QSOs with no more spots
 		for (_, qso) in qsos.drain_filter(|_, qso| {
-			qso.cycle_last() >= cycle - 2
+			qso.cycle_last() < cycle - 2
 		}) {
 			println!("{}", qso);
 		}
