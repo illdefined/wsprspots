@@ -4,7 +4,7 @@ mod excluded;
 use crate::excluded::EXCLUDED;
 
 use std::cmp::{self, Ordering, PartialEq, PartialOrd, Eq, Ord};
-use std::collections::{HashMap, BTreeSet, VecDeque};
+use std::collections::{HashMap, HashSet, BTreeSet, VecDeque};
 use std::convert::TryFrom;
 use std::env;
 use std::error::Error;
@@ -484,6 +484,12 @@ fn main() -> std::io::Result<()> {
 	// Active QSOs
 	let mut qsos = HashMap::<QsoKey, Qso>::new();
 
+	// Unique call signs
+	let mut contacts = HashSet::new();
+
+	// Number of individual QSOs
+	let mut num_qsos = 0usize;
+
 	let pkg_name = env!("CARGO_PKG_NAME");
 	let pkg_version = env!("CARGO_PKG_VERSION");
 	println!("Mutual WSPR spots for {}\n\
@@ -570,13 +576,17 @@ fn main() -> std::io::Result<()> {
 			tx.push_back(last);
 		}
 
+
 		// Log QSOs with no more spots
 		for (_, qso) in qsos.drain_filter(|_, qso| {
 			qso.cycle_last() < cycle - 2
 		}) {
 			println!("{}", qso);
+			contacts.insert(qso.call_ct);
+			num_qsos += 1;
 		}
 	}
 
+	eprintln!("Logged {} QSOs with {} unique call signs", num_qsos, contacts.len());
 	Ok(())
 }
