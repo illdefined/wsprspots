@@ -424,14 +424,12 @@ impl fmt::Display for Qso {
 		adif!("FREQ", "{:.6}", self.freq_op.mhz())?;
 		adif!("RX_FREQ", "{:.6}", self.freq_ct.mhz())?;
 
-		match Band::try_from(self.freq_op) {
-			Ok(band) => adif!("BAND", "{}{}", band.0, band.1)?,
-			Err(_) => ()
+		if let Ok(band) = Band::try_from(self.freq_op) {
+			adif!("BAND", "{}{}", band.0, band.1)?;
 		}
 
-		match Band::try_from(self.freq_ct) {
-			Ok(band) => adif!("BAND_RX", "{}{}", band.0, band.1)?,
-			Err(_) => ()
+		if let Ok(band) = Band::try_from(self.freq_ct) {
+			adif!("BAND_RX", "{}{}", band.0, band.1)?;
 		}
 
 		adif!("TX_PWR", "{:.4}", self.power_op.watts())?;
