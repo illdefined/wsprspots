@@ -356,7 +356,7 @@ impl Qso {
 			drift_op: ct.drift,
 			drift_ct: op.drift,
 			distance: op.distance,
-			spots: spots
+			spots
 		}
 	}
 
