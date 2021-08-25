@@ -548,8 +548,8 @@ fn main() -> std::io::Result<()> {
 				   spot.grid_tx == last.grid_rx {
 					let band_spot = Band::try_from(spot.frequency).unwrap();
 					qsos.entry(QsoKey(last.call_tx.clone(), last.grid_rx.clone(), last.grid_tx.clone(), band_last.clone(), band_spot)).or_insert_with(|| {
-						Qso::new(&last, &spot)
-					}).update(&last, &spot);
+						Qso::new(&last, spot)
+					}).update(&last, spot);
 				}
 			}
 
@@ -566,8 +566,8 @@ fn main() -> std::io::Result<()> {
 				   spot.grid_tx == last.grid_rx {
 					let band_spot = Band::try_from(spot.frequency).unwrap();
 					qsos.entry(QsoKey(last.call_rx.clone(), last.grid_tx.clone(), last.grid_rx.clone(), band_spot, band_last.clone())).or_insert_with(|| {
-						Qso::new(&spot, &last)
-					}).update(&spot, &last);
+						Qso::new(spot, &last)
+					}).update(spot, &last);
 				}
 			}
 
