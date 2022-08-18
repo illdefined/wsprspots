@@ -15,7 +15,7 @@ categories = ["command-line-utilities"]
 
 [dependencies]
 chrono = "0.4"
-phf = { version = "0.10", features = ["macros"] }
+phf = { version = "0.11", features = ["macros"] }
 smartstring = "1.0"
 unicase = "2.6"
 
