@@ -183,7 +183,7 @@ impl fmt::Display for Power {
 			1e-1..1e0
 				=> write!(fmtr, "{:.0} mW", round(watts, 1e-2) * 1e3),
 			1e0..1e1
-				=> write!(fmtr, "{:.1} W", watts),
+				=> write!(fmtr, "{watts:.1} W"),
 			1e1..1e2
 				=> write!(fmtr, "{:.0} W", round(watts, 1e0)),
 			1e2..1e3
@@ -449,7 +449,7 @@ impl fmt::Display for Qso {
 		let band_str = if band_op == band_ct {
 			band_op
 		} else {
-			format!("{} (RX {})", band_op, band_ct)
+			format!("{band_op} (RX {band_ct})")
 		};
 
 		adif!("QSLMSG",
@@ -504,7 +504,7 @@ fn main() -> std::io::Result<()> {
 		let last = match row.parse::<Spot>() {
 			Ok(spot) => spot,
 			Err(err) => {
-				eprintln!("Failed to parse row: {}\n\n{}", err, row);
+				eprintln!("Failed to parse row: {err}\n\n{row}");
 				continue;
 			}
 		};
@@ -579,7 +579,7 @@ fn main() -> std::io::Result<()> {
 		for (_, qso) in qsos.drain_filter(|_, qso| {
 			qso.cycle_last() < cycle - 2
 		}) {
-			println!("{}", qso);
+			println!("{qso}");
 			contacts.insert(qso.call_ct);
 			num_qsos += 1;
 		}
