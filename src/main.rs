@@ -1,4 +1,4 @@
-#![feature(exclusive_range_pattern, half_open_range_patterns, hash_drain_filter)]
+#![feature(exclusive_range_pattern, hash_drain_filter)]
 
 mod excluded;
 use crate::excluded::EXCLUDED;
